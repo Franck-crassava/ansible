@@ -1,0 +1,142 @@
+---
+- hosts: debian
+  become: true
+  remote_user: debian
+  vars:
+    mysql_password: root
+    server_name: ecommerce.fr
+    server_root: etc/ansible/prod
+    server_web: "{{ server_root }}/app/public"
+    git_repository: git@github.com:EpitechMscProPromo2025/T-WEB-600-LYN-6-1-ecommerce-jeremy.cusin-mermet.git
+
+  tasks:
+    - ping: ~
+
+    - name: Check Debian 11
+      meta: end_play
+      when: ansible_distribution != "Debian" or ansible_distribution_major_version != "11"
+
+    - name: Update APT packages
+      apt:
+        update_cache: yes
+
+    - name: Upgrade APT
+      apt:
+        upgrade: safe
+
+    - name: APT
+      apt:
+        name: software-properties-common
+        update_cache: yes
+
+    - name: Install dependencies
+      apt:
+        name:
+          - ca-certificates
+          - apt-transport-https
+          - software-properties-common
+          - wget
+          - curl
+          - lsb-release
+          - git
+          - unzip
+          - zip
+          - python3
+          - python3-pip
+          - python3-pymysql
+        state: latest
+        update_cache: yes
+
+    - name: Install MariaDB
+      apt:
+        name: mariadb-server
+        state: latest
+
+    - name: Start MariaDB
+      service:
+        name: mariadb
+        enabled: true
+        state: started
+
+    - name: Create user for MariaDB
+      mysql_user:
+        check_implicit_admin: true
+        login_password: "{{ mysql_password }}"
+        name: symfony
+        password: "{{ mysql_password }}"
+        priv: "*.*:ALL"
+        state: present
+
+    - name: Create MariaDB database
+      mysql_db:
+        login_user: symfony
+        login_password: "{{ mysql_password }}"
+        name: ecommerce
+        state: present
+
+    - name: Updating the repository
+      apt:
+        update_cache: true
+
+    - name: Install PHP
+      apt:
+        name: php8.2
+        state: present
+
+    - name: Install PHP packages
+      apt:
+        pkg:
+          - php8.2-mysql
+          - php8.2-curl
+          - php8.2-json
+          - php8.2-cgi
+          - php8.2-xsl
+          - php8.2-cgi
+          - php8.2-gd
+          - php8.2-mbstring
+          - php8.2-zip
+          - php8.2-xmlrpc
+          - php8.2-soap
+          - php8.2-intl
+          - libapache2-mod-php
+        state: present
+        update_cache: yes
+
+    - name: Install Composer
+      shell: "wget -O composer-setup.php https://getcomposer.org/installer ; sudo php composer-setup.php --install-dir=/usr/local/bin --filename=composer ; rm composer-setup.php"
+
+    - name: Update Composer
+      shell: "composer self-update"
+
+    - name: Edit /etc/ansible/hosts config
+      lineinfile:
+        dest: /etc/ansible/hosts
+        regexp: "{{ server_name }}"
+        line: "127.0.0.1 {{ server_name }}"
+
+    - name: Git clone
+      git:
+        repo: "{{ git_repo }}"
+        dest: "{{ server_root }}"
+        version: main
+      ignore_errors: true
+      become: false
+      remote_user: debian
+
+    - name: Add .env to app
+      template:
+        src: templates/.env
+        dest: "{{ server_root }}/app"
+
+    - name: Remove composer.lock
+      shell: "cd {{ server_root }}/app ; rm composer.lock"
+
+    - name: Install dependencies
+      composer:
+        command: install
+        working_dir: "{{ server_root }}/app"
+      become: false
+
+    - name: Start server
+      shell: "cd {{ server_root }}/app ; php bin/console server:start"
+      become: false
